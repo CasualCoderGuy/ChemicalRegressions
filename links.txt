@@ -1,0 +1,3 @@
+https://reference.wolfram.com/language/WolframClientForPython/
+https://github.com/WolframResearch/WolframClientForPython
+https://www.wolfram.com/wstp/
