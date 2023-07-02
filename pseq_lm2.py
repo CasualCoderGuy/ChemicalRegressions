@@ -17,13 +17,13 @@ def ResidualConcentration(LnCeqRow, LnBetaColumn, AlphaMat, CtTotal, Weights=Non
     #k = parvals['k']
     #LnCeq:row, kibővíteni, minden row ua
     LnCeqMat = LnCeqRow
-    for j in range(len(LnBetaColumn)):
-        numpy.vstack((LnCeqMat, LnCeqRow))
-    SjColumn = numpy.exp(LnBetaColumn)*(numpy.exp(numpy.sum((LnCeqMat**AlphaMat), axis=1).reshape(-1,1).astype(float)))
+    for j in range(len(LnBetaColumn)-1):
+        LnCeqMat = numpy.vstack((LnCeqMat, LnCeqRow))
+    SjColumn = numpy.exp(LnBetaColumn)*(numpy.exp(numpy.sum((LnCeqMat*AlphaMat), axis=1).reshape(-1,1)))
     #Sj:column, kibővíteni, minden column ua
     SjMat = SjColumn
-    for j in range(len(LnCeqRow)):
-        numpy.vstack((SjMat, SjColumn))
+    for j in range(len(LnCeqRow)-1):
+        SjMat = numpy.hstack((SjMat, SjColumn))
     CtRow = numpy.sum(AlphaMat*SjMat, axis=0)
     if nonconverging:
         #if isH:
@@ -37,18 +37,45 @@ def ConcentrationJacobian(LnCeqRow, LnBetaColumn, AlphaMat, CtTotal, Weights=Non
     #k = parvals['k']
     #LnCeq:row, kibővíteni, minden row ua
     LnCeqMat = LnCeqRow
-    for j in range(len(LnBetaColumn)):
-        numpy.vstack((LnCeqMat, LnCeqRow))
-    SjColumn = numpy.exp(LnBetaColumn)*(numpy.exp(numpy.sum((LnCeqMat**AlphaMat), axis=1).reshape(-1,1).astype(float)))
+    for j in range(len(LnBetaColumn)-1):
+        LnCeqMat = numpy.vstack((LnCeqMat, LnCeqRow))
+    SjColumn = numpy.exp(LnBetaColumn)*(numpy.exp(numpy.sum((LnCeqMat*AlphaMat), axis=1).reshape(-1,1)))
     #Sj:column, kibővíteni, minden column ua
     SjMat = SjColumn
     matsize = len(LnCeqRow)
     diag = numpy.zeros((matsize,matsize))
-    for j in range(matsize):
-        numpy.vstack((SjMat, SjColumn))
-        diag[j,j] = LnCeqRow[j]
-    
-    return numpy.dot(numpy.transpose(AlphaMat*SjMat),AlphaMat)+diag#+diag(exp(compEqConcLN)); #Jacobian
+    diag[0,0] = numpy.exp(LnCeqRow[0])
+    for j in range(matsize-1):
+        SjMat = numpy.hstack((SjMat, SjColumn))
+        diag[j+1,j+1] = numpy.exp(LnCeqRow[j+1])
+    CtRow = numpy.sum(AlphaMat*SjMat, axis=0)
+    jac = numpy.dot(numpy.transpose(AlphaMat*SjMat),AlphaMat)+diag#+diag(exp(compEqConcLN));
+    return jac
+
+def CalculateConcentration(LnCeqRow, LnBetaColumn, AlphaMat, CtTotal, Weights=None, nonconverging=False): #ret: conc, jac, res
+    #parvals = pars.valuesdict()
+    #k = parvals['k']
+    #LnCeq:row, kibővíteni, minden row ua
+    LnCeqMat = LnCeqRow
+    for j in range(len(LnBetaColumn)-1):
+        LnCeqMat = numpy.vstack((LnCeqMat, LnCeqRow))
+    SjColumn = numpy.exp(LnBetaColumn)*(numpy.exp(numpy.sum((LnCeqMat*AlphaMat), axis=1).reshape(-1,1)))
+    #Sj:column, kibővíteni, minden column ua
+    SjMat = SjColumn
+    matsize = len(LnCeqRow)
+    diag = numpy.zeros((matsize,matsize))
+    diag[0,0] = numpy.exp(LnCeqRow[0])
+    for j in range(matsize-1):
+        SjMat = numpy.hstack((SjMat, SjColumn))
+        diag[j+1,j+1] = numpy.exp(LnCeqRow[j+1])
+    CtRow = numpy.sum(AlphaMat*SjMat, axis=0)
+    jac = numpy.dot(numpy.transpose(AlphaMat*SjMat),AlphaMat)+diag#+diag(exp(compEqConcLN));
+    res = numpy.abs((CtTotal-CtRow)/CtTotal) #CtRow-CtTotal #
+    if nonconverging:
+        #if isH:
+        #    return 
+        res = numpy.log(CtRow/CtTotal)
+    return res, jac, CtRow
 
 def CalcTotalConcentrationMatrix(CinitialRow, CcompInTitrantRow, AddedVolumeCol, Vstart):
     return (numpy.dot(AddedVolumeCol.reshape(-1,1),CcompInTitrantRow.reshape(1,-1))+CinitialRow*Vstart)/((AddedVolumeCol+Vstart)[:,None]) #create mat from CinitialRow
@@ -58,17 +85,18 @@ def StartCeqCalc(CtotalMat, C0min):
     return numpy.log(mat/2)
 
 def NewtonRaphson(LnCeqRow, LnBetaColumn, AlphaMat, CtTotal, maxit, maxresidual):
-    res = ResidualConcentration(LnCeqRow, LnBetaColumn, AlphaMat, CtTotal)
-    jac = ConcentrationJacobian(LnCeqRow, LnBetaColumn, AlphaMat, CtTotal)
+    print("NR")
+    #CtCalc = Concentration(LnCeqRow, LnBetaColumn, AlphaMat, CtTotal)
+    CtCalc, jac, res = CalculateConcentration(LnCeqRow, LnBetaColumn, AlphaMat, CtTotal)
     for it in range(maxit):
-        dX=numpy.dot(jac.T,(res-CtTotal))
+        dX=numpy.dot(jac.T,(CtCalc-CtTotal))
         dX = numpy.where(dX>4.6, 4.6, dX)
         dX = numpy.where(dX<4.6, -4.6, dX)
         dX = numpy.where((dX<0).any() and (dX>-1e-6).any(), -1e-2, dX)
         dX = numpy.where((1e-6>dX).any() and (dX>0).any(), 1e-2, dX)
         LnCeqRow = LnCeqRow-dX
-        res = ResidualConcentration(LnCeqRow, LnBetaColumn, AlphaMat, CtTotal)
-        jac = ConcentrationJacobian(LnCeqRow, LnBetaColumn, AlphaMat, CtTotal)
+        #CtCalc = Concentration(LnCeqRow, LnBetaColumn, AlphaMat, CtTotal)
+        res, jac, CtCalc = CalculateConcentration(LnCeqRow, LnBetaColumn, AlphaMat, CtTotal)
         if all(i < maxresidual for i in res):
             break
     return LnCeqRow
@@ -89,14 +117,19 @@ TitrData = numpy.array(excel_data['Titration']).astype(float)
 CcompInTitrantRow = numpy.array([-0.149987, 0,0]).astype(float)
 print(CcompInTitrantRow)
 totC = CalcTotalConcentrationMatrix(CinitialRow,CcompInTitrantRow,TitrData[:,0],6.0117)
-print(totC)
+print(totC[0,:])
 ceq = StartCeqCalc(totC, 0.000001)
-print(ceq)
+#ceq = numpy.array([2.06155E-02, 1.23836E-17, 1.27912E-06])
+#ceq = numpy.log(ceq)
+print(ceq[0,:]) #[0,:]
 
-#optres = scipy.optimize.root(ResidualConcentration, ceq[0,:], jac=ConcentrationJacobian, args=(LnBetaColumn, AlphaMat, totC[0,:]))
-#res = ResidualConcentration(ceq[0,:], LnBetaColumn, AlphaMat, totC[0,:])
-#result = NewtonRaphson(ceq[0,:], LnBetaColumn, AlphaMat, totC[0,:], 300000, 0.3)
-#print(result)
+
+#result = scipy.optimize.root(CalculateConcentration, ceq[0,:], method='lm', jac=True, args=(LnBetaColumn, AlphaMat, totC[0,:]), options={})
+#result = scipy.optimize.root(ResidualConcentration, ceq[0,:], jac=ConcentrationJacobian, args=(LnBetaColumn, AlphaMat, totC[0,:]))
+#result, res2, res3 = CalculateConcentration(ceq, LnBetaColumn, AlphaMat, totC[0,:])
+result = NewtonRaphson(ceq[0,:], LnBetaColumn, AlphaMat, totC[0,:], 300000, 0.3)
+print(result)
+#print(numpy.exp(result.x))
 
 
 xdata=[1, 1]
